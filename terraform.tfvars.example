@@ -1,0 +1,27 @@
+# Example Terraform Variables Configuration
+# Copy this file to terraform.tfvars and update with your values
+# DO NOT commit terraform.tfvars to source control (it's in .gitignore)
+
+# Resource Group Configuration
+resource_group_name        = "rg-apim-afd-demo"
+location                   = "eastus"  # Choose your preferred Azure region
+
+# Naming Configuration  
+prefix                     = "mycompany"  # Must be globally unique (used in APIM service name)
+
+# APIM Publisher Information (Required)
+apim_publisher_name        = "Your Company Name"
+apim_publisher_email       = "admin@example.com"  # Valid email required for notifications
+
+# APIM Capacity (Scale 1-30+ units)
+apim_capacity              = 1  # Start with 1, scale as needed (~$2,700/month per unit)
+
+# High Availability (Premium SKU feature)
+enable_availability_zones  = false  # Set to true for production zone redundancy (3x cost)
+
+# Resource Tags
+tags = {
+  Environment = "Production"
+  ManagedBy   = "Terraform"
+  Project     = "APIM-FrontDoor-PrivateLink"
+}
