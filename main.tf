@@ -137,6 +137,7 @@ resource "azurerm_cdn_frontdoor_origin" "apim_portal_origin" {
 }
 
 # Front Door Route - API Gateway Traffic
+# Handles API calls, health checks, and root path (portal paths are handled separately)
 resource "azurerm_cdn_frontdoor_route" "route" {
   name                          = "${var.prefix}-route"
   cdn_frontdoor_endpoint_id     = azurerm_cdn_frontdoor_endpoint.endpoint.id
@@ -153,6 +154,7 @@ resource "azurerm_cdn_frontdoor_route" "route" {
 }
 
 # Front Door Route - Developer Portal Traffic
+# Handles portal-specific paths - evaluated before the gateway route
 resource "azurerm_cdn_frontdoor_route" "portal_route" {
   name                          = "${var.prefix}-portal-route"
   cdn_frontdoor_endpoint_id     = azurerm_cdn_frontdoor_endpoint.endpoint.id
@@ -166,7 +168,7 @@ resource "azurerm_cdn_frontdoor_route" "portal_route" {
   supported_protocols    = ["Http", "Https"]
 
   link_to_default_domain = true
-
+  
   depends_on = [azurerm_cdn_frontdoor_route.route]
 }
 
