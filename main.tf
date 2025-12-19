@@ -176,7 +176,8 @@ resource "azurerm_cdn_frontdoor_route" "portal_route" {
     "/assets/*",
     "/dist/*",
     "/images/*",
-    "/fonts/*"
+    "/fonts/*",
+    "/content/*"
   ]
   supported_protocols    = ["Http", "Https"]
 
