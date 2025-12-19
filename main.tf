@@ -164,7 +164,20 @@ resource "azurerm_cdn_frontdoor_route" "portal_route" {
   enabled                = true
   forwarding_protocol    = "HttpsOnly"
   https_redirect_enabled = true
-  patterns_to_match      = ["/signin", "/signin/*", "/signup", "/signup/*", "/confirm", "/confirm/*", "/captcha", "/captcha/*", "/delegations", "/delegations/*", "/profile", "/profile/*"]
+  patterns_to_match      = [
+    "/signin", "/signin/*", 
+    "/signup", "/signup/*", 
+    "/confirm", "/confirm/*", 
+    "/captcha", "/captcha/*", 
+    "/delegations", "/delegations/*", 
+    "/profile", "/profile/*",
+    "/styles/*", 
+    "/scripts/*", 
+    "/assets/*",
+    "/dist/*",
+    "/images/*",
+    "/fonts/*"
+  ]
   supported_protocols    = ["Http", "Https"]
 
   link_to_default_domain = true
