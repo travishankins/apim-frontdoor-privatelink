@@ -7,6 +7,10 @@
 .terraform/
 .terraform.lock.hcl
 
+# Terraform plan files
+tfplan
+*.tfplan
+
 # Crash log files
 crash.log
 crash.*.log
