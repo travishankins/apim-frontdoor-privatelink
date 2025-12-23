@@ -49,8 +49,12 @@ az login
 # Set your subscription
 az account set --subscription "Your-Subscription-Name"
 
+# Set subscription ID as environment variable (required for Terraform)
+export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+
 # Verify
 az account show
+echo $ARM_SUBSCRIPTION_ID
 ```
 
 ### Step 4: Initialize Terraform
@@ -78,9 +82,13 @@ terraform apply
 ```
 
 **Expected timeline:**
-- Front Door resources: 2-5 minutes
-- APIM Premium: 15-30 minutes
-- Total: ~20-35 minutes
+- Resource Group: ~30 seconds
+- APIM Premium: 20-25 minutes
+- Front Door Profile: ~45 seconds  
+- Front Door Origins (2): ~3-4 minutes each
+- Front Door Routes (2): ~40 seconds each
+- Front Door Endpoint & WAF: ~1-2 minutes
+- **Total: ~25-30 minutes**
 
 ### Step 7: Approve Private Endpoint ⚠️
 
@@ -137,15 +145,22 @@ curl -I https://yourcompany-apim.azure-api.net
 # Get your Front Door URL
 terraform output front_door_endpoint_url
 
-# Test (will return 404 if no APIs configured, but confirms connection works)
-curl -I https://yourcompany-endpoint-xxxxxxxx.b01.azurefd.net
+# Test developer portal access (should return 200 OK)
+curl -I https://yourcompany-endpoint-xxxxxxxx.b01.azurefd.net/signin
+
+# Test root path (should return 200 OK)
+curl -I https://yourcompany-endpoint-xxxxxxxx.b01.azurefd.net/
+
+# Test signup page (should return 200 OK)
+curl -I https://yourcompany-endpoint-xxxxxxxx.b01.azurefd.net/signup
 ```
 
 **Success indicators:**
-- HTTP/2 response (Front Door)
+- HTTP/2 200 OK response
 - `x-azure-ref` header present
 - `x-cache` header present
-- Status 404 (expected without APIs) OR 200 (if APIs configured)
+- `content-type: text/html` for portal pages
+- Portal pages load successfully in browser
 
 ### Step 9: View Deployment Outputs
 ```bash
@@ -314,9 +329,14 @@ You'll be charged until resources are fully deleted. APIM deletion can take 30+ 
 **Problem**: Public access not disabled  
 **Solution**: Verify `public_network_access_enabled = false` in main.tf and re-apply
 
-#### Issue: Can't access developer portal
-**Problem**: Public access is disabled (by design for security)  
-**Solution**: Temporarily enable public access (see Post-Deployment section)
+#### Issue: Developer portal returns 404 through Front Door
+**Problem**: Portal origin Host header not configured correctly  
+**Solution**: 
+1. Verify portal origin `origin_host_header` is set to `<apim-name>.developer.azure-api.net`
+2. Verify portal origin `host_name` is set to `<apim-name>.azure-api.net` (gateway)
+3. Wait 5-10 minutes after private endpoint approval for provisioning
+4. Check Front Door deployment status in Azure Portal
+5. Portal should be accessible at: `https://<frontdoor-endpoint>.azurefd.net/signin`
 
 #### Issue: Terraform authentication fails
 **Problem**: Not logged into Azure or wrong subscription  

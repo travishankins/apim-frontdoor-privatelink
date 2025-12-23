@@ -49,7 +49,17 @@ enable_availability_zones  = false # Set to true for zone redundancy
 
 > **Note**: Replace `prefix`, `apim_publisher_name`, and `apim_publisher_email` with your values. The prefix must be globally unique as it's used in the APIM service name.
 
-### 2. Deploy
+### 2. Set Azure Subscription
+
+```bash
+# Set your Azure subscription ID as environment variable
+export ARM_SUBSCRIPTION_ID="your-subscription-id-here"
+
+# Or set it for the current session
+az account show --query id -o tsv | xargs -I {} export ARM_SUBSCRIPTION_ID={}
+```
+
+### 3. Deploy
 
 ```bash
 # Initialize Terraform
@@ -58,11 +68,11 @@ terraform init
 # Review the plan
 terraform plan
 
-# Deploy (Premium takes ~15-30 minutes for initial deployment)
+# Deploy (Premium takes ~20-30 minutes for initial deployment)
 terraform apply
 ```
 
-### 3. Approve Private Endpoint Connection ⚠️
+### 4. Approve Private Endpoint Connection ⚠️
 
 **IMPORTANT MANUAL STEP**: After deployment, you must approve the private endpoint connection:
 
@@ -78,51 +88,64 @@ terraform apply
 az network private-endpoint-connection list \
   --name <your-apim-name> \
   --resource-group <your-rg-name> \
-  --type Microsoft.ApiManagement/service
+  --type Microsoft.ApiManagement/service \
+  --query '[].{name: name, status: properties.privateLinkServiceConnectionState.status}' -o table
 
-# Approve the connection
+# Approve the connection using the connection name
 az network private-endpoint-connection approve \
-  --id <connection-id-from-above> \
+  --name <connection-name> \
+  --resource-name <your-apim-name> \
+  --resource-group <your-rg-name> \
+  --type Microsoft.ApiManagement/service \
   --description "Approved Front Door private link"
 ```
 
-### 4. Test the Deployment
+**Wait 5-10 minutes** after approval for the connection to fully establish and Front Door to deploy.
+
+### 5. Test the Deployment
 
 ```bash
 # Get the Front Door endpoint URL
 terraform output front_door_endpoint_url
 
-# Test the connection (after approval)
-curl https://<your-frontdoor-endpoint>.azurefd.net/status-0123456789abcdef
+# Test developer portal access (should return 200 OK)
+curl -I https://<your-frontdoor-endpoint>.azurefd.net/signin
+
+# Test root path (should return 200 OK)
+curl -I https://<your-frontdoor-endpoint>.azurefd.net/
 ```
 
-### 5. Publish the Developer Portal ⚠️
+### 6. Verify Developer Portal Access
 
-**IMPORTANT**: The Developer Portal must be published before it's fully functional:
+**The Developer Portal is accessible through Front Door** using Host header routing:
 
-#### Option A: Azure Portal (Recommended)
-1. Go to **Azure Portal** → **API Management** → Your APIM instance
-2. Navigate to **Developer portal** → **Portal overview**
-3. Click **Publish**
-
-#### Option B: Verify Portal Status
 ```bash
-# Check if portal is published
-curl -s https://<your-apim-name>.developer.azure-api.net | grep "hasn't been published"
+# Test developer portal paths (should all return 200 OK)
+curl -I https://<your-frontdoor-endpoint>.azurefd.net/signin
+curl -I https://<your-frontdoor-endpoint>.azurefd.net/signup
+curl -I https://<your-frontdoor-endpoint>.azurefd.net/profile
 ```
 
-**Developer Portal Access:**
-- **Portal paths through Front Door**: Portal-specific routes (`/signin`, `/signup`, `/profile`) are configured and will work after publishing
-- **Direct portal URL**: `https://<your-apim-name>.developer.azure-api.net`
-- **Front Door endpoint**: Portal pages accessible via `https://<your-frontdoor-endpoint>.azurefd.net/signin` (after publishing)
+**How It Works:**
+- Front Door connects to APIM via Private Link using the **Gateway hostname** (`<name>.azure-api.net`)
+- The portal origin sends the **Developer Portal hostname** (`<name>.developer.azure-api.net`) in the HTTP Host header
+- APIM routes the request to the Developer Portal based on the Host header
+- This allows a single Private Link connection to serve both Gateway and Portal traffic
 
-**Key Points:**
-- The **Gateway** Private Link connection provides access to **both** the API Gateway and Developer Portal
-- Portal routes are pre-configured for `/signin`, `/signup`, `/confirm`, `/captcha`, `/delegations`, `/profile`
-- Both API calls and portal access go through the secure Private Link connection
-- Initial deployment has public access **enabled** (required for APIM creation)
+**Portal Routes Configured:**
+- Root: `/`
+- Authentication: `/signin`, `/signin/*`, `/signup`, `/signup/*`
+- User functions: `/profile`, `/profile/*`, `/confirm`, `/confirm/*`
+- Portal features: `/captcha`, `/delegations`
+- Static assets: `/styles/*`, `/scripts/*`, `/assets/*`, `/dist/*`, `/images/*`, `/fonts/*`, `/content/*`
 
-> **Note**: Azure APIM Private Link only supports the "Gateway" target type, but this provides secure access to all APIM endpoints including the Developer Portal, Management API, and Gateway.
+**Key Architecture Points:**
+- Private Link target type: **Gateway** (only supported type for APIM)
+- Gateway origin: Uses gateway hostname for both connection and Host header
+- Portal origin: Uses gateway hostname for connection, developer hostname for Host header
+- This is the **correct and only** way to access the Developer Portal through Private Link
+
+> **Note**: If you need to publish or customize the portal, you can temporarily enable public access, make changes, then disable it again.
 
 ## 📦 Resources Created
 
@@ -133,8 +156,8 @@ curl -s https://<your-apim-name>.developer.azure-api.net | grep "hasn't been pub
 | Front Door Profile | Premium tier with Private Link support |
 | Front Door Endpoint | Public entry point (global CDN) |
 | Front Door Origin Group | Health probes and load balancing configuration |
-| Front Door Origin (Gateway) | APIM connection with Private Link to Gateway endpoint |
-| Front Door Origin (Portal) | APIM connection with Private Link to Developer Portal endpoint |
+| Front Door Origin (Gateway) | APIM connection with Private Link; uses gateway hostname for both connection and Host header |
+| Front Door Origin (Portal) | APIM connection with Private Link; uses gateway hostname for connection, developer portal hostname for Host header (enables portal routing) |
 | Front Door Route (API) | Traffic routing for API calls (pattern: `/*`) |
 | Front Door Route (Portal) | Traffic routing for portal pages (patterns: `/signin`, `/signup`, `/profile`, etc.) |
 | WAF Policy | Web Application Firewall with Microsoft managed rules |
@@ -376,11 +399,14 @@ terraform destroy
 - Wait 5-10 minutes for the change to propagate
 
 ### Issue: Developer Portal returns 404 through Front Door
-**Solution**: The portal needs to be published first:
-- Portal shows "The content hasn't been published yet" on initial deployment
-- Go to Azure Portal → APIM → Developer portal → Portal overview → **Publish**
-- After publishing, portal paths (`/signin`, `/signup`) will be accessible
-- Portal routes are pre-configured and will work once content is published
+**Solution**: Verify the portal origin configuration:
+1. Check that portal origin has correct Host header: `<apim-name>.developer.azure-api.net`
+2. Verify private endpoint connection is approved and provisioned (wait 5-10 minutes after approval)
+3. Wait for Front Door deployment to complete (check Azure Portal for deployment status)
+4. Test direct portal access works: `curl -I https://<apim-name>.developer.azure-api.net/signin`
+5. If direct access returns 404, the portal may need publishing (Azure Portal → APIM → Developer portal → Publish)
+
+**Key**: The portal origin must use gateway hostname for `host_name` but developer portal hostname for `origin_host_header`
 
 ### Issue: Direct APIM access still works (not blocked)
 
