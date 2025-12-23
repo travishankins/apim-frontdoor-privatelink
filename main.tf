@@ -93,10 +93,7 @@ resource "azurerm_cdn_frontdoor_origin_group" "apim_origin_group" {
   }
 }
 
-# Front Door Origin (APIM with Private Link)
-# Single origin for both Gateway and Developer Portal
-# Note: APIM Private Link "Gateway" target type provides access to both
-# the API Gateway and Developer Portal through the same connection
+# Front Door Origin - Gateway (APIM with Private Link)
 resource "azurerm_cdn_frontdoor_origin" "apim_origin" {
   name                           = "${var.prefix}-apim-origin"
   cdn_frontdoor_origin_group_id  = azurerm_cdn_frontdoor_origin_group.apim_origin_group.id
@@ -114,6 +111,28 @@ resource "azurerm_cdn_frontdoor_origin" "apim_origin" {
     location               = "centralus" # Using Central US as West Central US is not supported for Private Link
     private_link_target_id = azurerm_api_management.apim.id
     target_type            = "Gateway" # For APIM, only "Gateway" is supported; covers both Gateway and Portal
+  }
+}
+
+# Front Door Origin - Portal (uses gateway hostname for Private Link but developer hostname for Host header)
+resource "azurerm_cdn_frontdoor_origin" "apim_portal_origin" {
+  name                           = "${var.prefix}-portal-origin"
+  cdn_frontdoor_origin_group_id  = azurerm_cdn_frontdoor_origin_group.apim_origin_group.id
+  enabled                        = true
+  certificate_name_check_enabled = true
+
+  # host_name: Connect via gateway hostname (what Private Link exposes)
+  # origin_host_header: Send developer portal hostname in Host header (so APIM routes to portal)
+  host_name          = trimsuffix(trimprefix(azurerm_api_management.apim.gateway_url, "https://"), "/")
+  origin_host_header = "${var.prefix}-apim.developer.azure-api.net"
+  priority           = 1
+  weight             = 1000
+
+  private_link {
+    request_message        = "Please approve this private endpoint connection from Front Door (Portal)"
+    location               = "centralus"
+    private_link_target_id = azurerm_api_management.apim.id
+    target_type            = "Gateway" # Same Private Link serves both Gateway and Portal
   }
 }
 
@@ -135,12 +154,12 @@ resource "azurerm_cdn_frontdoor_route" "route" {
 }
 
 # Front Door Route - Developer Portal Traffic
-# Handles portal-specific paths using the same origin - evaluated before the gateway route
+# Handles portal-specific paths using dedicated portal origin - evaluated before the gateway route
 resource "azurerm_cdn_frontdoor_route" "portal_route" {
   name                          = "${var.prefix}-portal-route"
   cdn_frontdoor_endpoint_id     = azurerm_cdn_frontdoor_endpoint.endpoint.id
   cdn_frontdoor_origin_group_id = azurerm_cdn_frontdoor_origin_group.apim_origin_group.id
-  cdn_frontdoor_origin_ids      = [azurerm_cdn_frontdoor_origin.apim_origin.id]
+  cdn_frontdoor_origin_ids      = [azurerm_cdn_frontdoor_origin.apim_portal_origin.id]
 
   enabled                = true
   forwarding_protocol    = "HttpsOnly"
